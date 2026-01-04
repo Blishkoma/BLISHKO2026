@@ -185,7 +185,7 @@ def load_data(repo):
             "Date", "XP", "Phone", "Weight", "PnL", "Twitch",
             "School", "Finance", "Prayer", "Reading", "Sport", 
             "Hygiene", "Budget"
-        ])
+        ]), None
     
     try:
         contents = repo.get_contents("data_2026.csv")
@@ -682,6 +682,7 @@ with tab2:
         col_a, col_b = st.columns(2)
         
         with col_a:
-            st.markdown("""
-                <div style="background-color: #1C1C1E; padding: 20px; border-radius: 14px;">
-                    <h4>📊 T
+            st.markdown("#### 🏆 Taux de Réussite")
+            
+            if "School" in df.columns:
+                school_rate = (
