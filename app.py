@@ -432,7 +432,7 @@ with tab1:
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- SPORT (MUSCU) ---
+# --- SPORT (MUSCU) ---
     st.markdown('<div class="ios-card">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">💪 SPORT - MUSCULATION</div>', unsafe_allow_html=True)
     
@@ -664,10 +664,6 @@ with tab2:
         with col_b:
             st.markdown("#### 💪 Habitudes Physiques")
             sport_rate = (df["Sport"].sum() / len(df) * 100) if "Sport" in df.columns else 0
-            hygiene_rate = (df["Hygiene"].sum() / len(df) * 100) if "Hygiene" in df.columns else 0
-            budget_rate = (df["Budget"].sum() / len(df) * 100) if "Budget" in df
-
-sport_rate = (df["Sport"].sum() / len(df) * 100) if "Sport" in df.columns else 0
             hygiene_rate = (df["Hygiene"].sum() / len(df) * 100) if "Hygiene" in df.columns else 0
             budget_rate = (df["Budget"].sum() / len(df) * 100) if "Budget" in df.columns else 0
             
