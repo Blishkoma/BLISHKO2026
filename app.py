@@ -2,22 +2,71 @@ import streamlit as st
 import pandas as pd
 from github import Github
 from io import StringIO
-from datetime import date
+from datetime import date, datetime
+import pytz
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="2026: FOCUS", page_icon="🎯", layout="centered")
+# --- 1. CONFIGURATION & DESIGN SYSTEM (STYLE IOS) ---
+st.set_page_config(page_title="Focus 2026", page_icon="", layout="centered")
 
-# --- DESIGN ÉPURÉ ---
+# CSS AVANCÉ POUR LE LOOK "APPLE"
 st.markdown("""
     <style>
-    .big-title { font-size: 40px !important; font-weight: bold; text-align: center; margin-bottom: 0px; }
-    .subtitle { font-size: 18px; text-align: center; color: #888; margin-bottom: 20px; }
-    .stProgress > div > div > div > div { background-color: #4CAF50; }
-    .metric-box { background-color: #f0f2f6; padding: 10px; border-radius: 10px; text-align: center; color: black; font-weight: bold;}
+    /* Fond gris clair style iOS */
+    .stApp {
+        background-color: #F2F2F7;
+    }
+    
+    /* Carte style Widget iOS */
+    .ios-card {
+        background-color: #FFFFFF;
+        border-radius: 22px;
+        padding: 20px;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        transition: transform 0.1s;
+    }
+    .ios-card:active {
+        transform: scale(0.98);
+    }
+    
+    /* Titres */
+    h1 {
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        font-weight: 800;
+        color: #000000;
+        font-size: 32px !important;
+        margin-bottom: 5px;
+    }
+    h3 {
+        font-family: -apple-system, sans-serif;
+        font-weight: 600;
+        color: #1C1C1E;
+        margin: 0;
+        padding: 0;
+    }
+    p {
+        color: #8E8E93;
+        font-family: -apple-system, sans-serif;
+    }
+
+    /* Boutons custom pour ressembler à des liens iOS */
+    .stButton > button {
+        border-radius: 12px;
+        font-weight: 600;
+        border: none;
+        background-color: #007AFF; /* Apple Blue */
+        color: white;
+    }
+    
+    /* Barre de progression style Santé */
+    .stProgress > div > div > div > div {
+        background-color: #34C759; /* Apple Green */
+        border-radius: 10px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FONCTIONS GITHUB (Pour la sauvegarde) ---
+# --- 2. FONCTIONS BACKEND (GITHUB) ---
 def get_data():
     try:
         token = st.secrets["GITHUB_TOKEN"]
@@ -29,132 +78,183 @@ def get_data():
             df = pd.read_csv(StringIO(contents.decoded_content.decode("utf-8")))
             return repo, contents, df
         except:
-            return repo, None, pd.DataFrame(columns=["Date", "Score", "Phone", "Weight", "Twitch", "Note"])
-    except:
-        return None, None, pd.DataFrame()
+            return repo, None, pd.DataFrame(columns=["Date", "XP", "Phone", "Weight", "Finance_PnL", "Note"])
+    except Exception as e:
+        return None, None, None # Renvoie None si erreur secrets
 
-def save_data(repo, contents, df, new_row):
-    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-    csv = df.to_csv(index=False)
+def save_data(repo, contents, df, new_data):
+    # Mise à jour du DataFrame
+    df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
+    csv_content = df.to_csv(index=False)
+    
     if contents:
-        repo.update_file(contents.path, "Update", csv, contents.sha)
+        repo.update_file(contents.path, "Daily Update", csv_content, contents.sha)
     else:
-        repo.create_file("data_2026.csv", "Init", csv)
+        repo.create_file("data_2026.csv", "Init Data", csv_content)
     return df
 
-# --- DÉBUT DE L'INTERFACE ---
+# --- 3. GESTION DE L'ÉTAT (NAVIGATION) ---
+# C'est ici qu'on gère "quelle page est affichée"
+if 'page' not in st.session_state:
+    st.session_state.page = 'home'
+if 'inputs' not in st.session_state:
+    st.session_state.inputs = {}
 
-# On prépare un espace vide en haut pour le Score (on le remplira à la fin du code)
-header_placeholder = st.container()
+def navigate_to(page_name):
+    st.session_state.page = page_name
 
-# Connexion aux données
+# Chargement données
 repo, contents, df = get_data()
 
-# --- LES ONGLETS (Navigation simple) ---
-t1, t2, t3 = st.tabs(["🦍 PHYSIQUE", "🧠 MENTAL", "💸 EMPIRE"])
+# --- PAGE 1 : DASHBOARD (ACCUEIL) ---
+if st.session_state.page == 'home':
+    
+    # En-tête Date
+    today = date.today().strftime("%A %d %B")
+    st.markdown(f"<h1>Aujourd'hui</h1><p>{today}</p>", unsafe_allow_html=True)
 
-# Variables pour le score
-total_objectifs = 8 
-objectifs_attains = 0
+    if repo is None:
+        st.error("⚠️ Erreur de connexion GitHub. Vérifie tes 'Secrets' sur Streamlit Cloud.")
+    
+    # Barre de progression globale (Résumé)
+    xp_global = st.session_state.inputs.get('xp_temp', 0)
+    st.progress(xp_global / 100)
+    
+    st.markdown("---")
 
-# >>> ONGLET 1 : PHYSIQUE <<<
-with t1:
-    st.write("### ⚖️ Mon Corps")
-    # Poids
-    weight = st.number_input("Poids du jour (kg)", value=70.0, step=0.1)
-    if not df.empty and "Weight" in df.columns:
-        diff = weight - df.iloc[-1]["Weight"]
-        st.caption(f"Variation: {diff:+.1f} kg")
+    # --- CARTE 1 : FINANCE (La grosse bulle) ---
+    with st.container():
+        st.markdown('<div class="ios-card">', unsafe_allow_html=True)
+        col_icon, col_text, col_action = st.columns([1, 4, 1])
+        with col_icon:
+            st.markdown("💸")
+        with col_text:
+            st.markdown("<h3>Finance & Empire</h3>", unsafe_allow_html=True)
+            last_pnl = df.iloc[-1]['Finance_PnL'] if (df is not None and not df.empty and 'Finance_PnL' in df.columns) else 0
+            st.caption(f"Dernier PnL: {last_pnl} €")
+        with col_action:
+            if st.button(" Ouvrir ", key="btn_finance"):
+                navigate_to('finance')
+                st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.write("### ⚔️ Discipline Physique")
-    c1 = st.checkbox("🔥 20 Pompes x2 (Matin/Soir)")
-    c2 = st.checkbox("💪 60 Reps Barre Muscu")
-    c3 = st.checkbox("🧹 Chambre Clean & Hygiène")
-    
-    if c1: objectifs_attains += 1
-    if c2: objectifs_attains += 1
-    if c3: objectifs_attains += 1
+    # --- CARTE 2 : PHYSIQUE ---
+    with st.container():
+        st.markdown('<div class="ios-card">', unsafe_allow_html=True)
+        col_icon, col_text, col_action = st.columns([1, 4, 1])
+        with col_icon:
+            st.markdown("🦍")
+        with col_text:
+            st.markdown("<h3>Physique & Santé</h3>", unsafe_allow_html=True)
+            st.caption("Pompes, Barre, Poids...")
+        with col_action:
+            if st.button(" Ouvrir ", key="btn_physique"):
+                navigate_to('physique')
+                st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-# >>> ONGLET 2 : MENTAL <<<
-with t2:
-    st.write("### 📵 Temps de Vie")
-    st.write("Sur une journée de 16h éveillé :")
-    phone = st.number_input("Combien d'heures sur ton tel ?", value=3.0, step=0.5)
-    
-    # Nouvelle logique simple : 16h - temps écran
-    vie_gagnee = 16 - phone
-    st.info(f"✨ Tu as vécu **{vie_gagnee} heures** pour toi aujourd'hui.")
-    
-    # Point gagné si moins de 3h (ou autre limite que tu veux)
-    if phone < 3:
-        objectifs_attains += 1
-        st.caption("✅ Objectif < 3h validé")
-    else:
-        st.caption("❌ Trop d'écran")
+    # --- CARTE 3 : MENTAL (Prière, Lecture) ---
+    with st.container():
+        st.markdown('<div class="ios-card">', unsafe_allow_html=True)
+        col_icon, col_text, col_action = st.columns([1, 4, 1])
+        with col_icon:
+            st.markdown("🧠")
+        with col_text:
+            st.markdown("<h3>Mental & Spirituel</h3>", unsafe_allow_html=True)
+            st.caption("Prière, Lecture, Digital...")
+        with col_action:
+            if st.button(" Ouvrir ", key="btn_mental"):
+                navigate_to('mental')
+                st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.write("### 🧠 Esprit")
-    c4 = st.checkbox("📖 Lecture (Min 10 pages)")
-    c5 = st.checkbox("🙏 Prière / Méditation")
-    
-    if c4: objectifs_attains += 1
-    if c5: objectifs_attains += 1
-
-# >>> ONGLET 3 : EMPIRE <<<
-with t3:
-    st.write("### 👾 Twitch & Finance")
-    twitch = st.number_input("Abonnés Twitch", value=11, step=1)
-    
-    c6 = st.checkbox("🔴 Action Twitch faite")
-    c7 = st.checkbox("💰 Check Finance & 0 Dépense")
-    
-    if c6: objectifs_attains += 1
-    if c7: objectifs_attains += 1
-
-# --- REMPLISSAGE DU HAUT DE PAGE (Maintenant qu'on a les calculs) ---
-with header_placeholder:
-    st.markdown('<div class="big-title">BLISHKO MINDSET</div>', unsafe_allow_html=True)
-    
-    # Calcul pourcentage
-    score_pct = int((objectifs_attains / total_objectifs) * 100)
-    reste_a_faire = total_objectifs - objectifs_attains
-    
-    # Barre de progression
-    st.progress(score_pct / 100)
-    
-    # Message simple
-    if reste_a_faire == 0:
-        st.success("👑 TOUT EST FAIT. TU ES LE ROI.")
-    else:
-        st.warning(f"⚠️ Il te reste **{reste_a_faire} actions** à valider.")
-    
-    st.divider()
-
-# --- SAUVEGARDE ---
-st.write("")
-note = st.text_input("Une note pour aujourd'hui ?")
-
-if st.button("💾 SAUVEGARDER MA JOURNÉE", type="primary", use_container_width=True):
-    if repo:
-        today = str(date.today())
-        # Vérif doublon
-        if not df.empty and today in df["Date"].values:
-            st.error("Déjà enregistré aujourd'hui ! Reviens demain.")
-        else:
-            new_data = {
-                "Date": today,
-                "Score": score_pct,
+    # BOUTON FINAL SAUVEGARDE
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("✅  CLÔTURER MA JOURNÉE", type="primary", use_container_width=True):
+        if repo:
+            # Récupération des données stockées en session
+            pnl = st.session_state.inputs.get('pnl', 0)
+            weight = st.session_state.inputs.get('weight', 70)
+            phone = st.session_state.inputs.get('phone', 3)
+            
+            # Calcul XP (Simplifié : 1 point par section validée)
+            # Tu pourras affiner ce calcul
+            xp = 100 # Placeholder pour l'instant
+            
+            new_row = {
+                "Date": str(date.today()),
+                "XP": xp,
                 "Phone": phone,
                 "Weight": weight,
-                "Twitch": twitch,
-                "Note": note
+                "Finance_PnL": pnl,
+                "Note": "RAS"
             }
-            save_data(repo, contents, df, new_data)
+            save_data(repo, contents, df, new_row)
             st.balloons()
-            st.success("✅ Validé !")
-    else:
-        st.error("Erreur connexion GitHub (Vérifie tes Secrets)")
+            st.success("Journée enregistrée.")
 
-# --- VISUALISATION RAPIDE ---
-if not df.empty:
-    with st.expander("📊 Voir mes courbes"):
-        st.line_chart(df.set_index("Date")["Score"])
+# --- PAGE 2 : DÉTAIL FINANCE ---
+elif st.session_state.page == 'finance':
+    st.button("← Retour", on_click=lambda: navigate_to('home'))
+    st.markdown("<h1>💰 Finance</h1>", unsafe_allow_html=True)
+    
+    # Input
+    st.markdown('<div class="ios-card">', unsafe_allow_html=True)
+    st.write("**Résultat du jour (€)**")
+    pnl_input = st.number_input("Plus-value / Moins-value", step=1.0)
+    st.session_state.inputs['pnl'] = pnl_input
+    
+    # Validation glissante (Toggle)
+    st.write("")
+    is_done = st.toggle("Valider la gestion financière", key="toggle_finance")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Graphique
+    if df is not None and not df.empty and 'Finance_PnL' in df.columns:
+        st.markdown("### 📈 Courbe PnL")
+        st.line_chart(df.set_index("Date")["Finance_PnL"])
+
+# --- PAGE 3 : DÉTAIL PHYSIQUE ---
+elif st.session_state.page == 'physique':
+    st.button("← Retour", on_click=lambda: navigate_to('home'))
+    st.markdown("<h1>🦍 Physique</h1>", unsafe_allow_html=True)
+    
+    st.markdown('<div class="ios-card">', unsafe_allow_html=True)
+    st.write("**Poids du corps (kg)**")
+    w_input = st.number_input("Poids", value=70.0, step=0.1)
+    st.session_state.inputs['weight'] = w_input
+    
+    st.divider()
+    
+    # Toggles (Glisser pour valider)
+    t1 = st.toggle("20 Pompes x2")
+    t2 = st.toggle("60 Reps Barre")
+    t3 = st.toggle("Hygiène Impeccable")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Graphique Poids
+    if df is not None and not df.empty and 'Weight' in df.columns:
+        st.markdown("### ⚖️ Courbe de Poids")
+        st.line_chart(df.set_index("Date")["Weight"])
+
+# --- PAGE 4 : DÉTAIL MENTAL ---
+elif st.session_state.page == 'mental':
+    st.button("← Retour", on_click=lambda: navigate_to('home'))
+    st.markdown("<h1>🧠 Mental</h1>", unsafe_allow_html=True)
+
+    st.markdown('<div class="ios-card">', unsafe_allow_html=True)
+    st.write("**Temps d'écran (Heures)**")
+    ph_input = st.number_input("Heures", value=3.0, step=0.1)
+    st.session_state.inputs['phone'] = ph_input
+    
+    if ph_input < 3:
+        st.success("✨ Temps gagné : " + str(round(3-ph_input, 1)) + "h")
+    else:
+        st.error("⚠️ Temps perdu : " + str(round(ph_input-3, 1)) + "h")
+    
+    st.divider()
+    
+    t_pray = st.toggle("Prière du jour")
+    t_read = st.toggle("Lecture terminée")
+    st.markdown('</div>', unsafe_allow_html=True)
+
