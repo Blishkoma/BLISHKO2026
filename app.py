@@ -5,62 +5,39 @@ from io import StringIO
 from datetime import date, datetime
 import pytz
 
-# --- 1. CONFIGURATION & DESIGN SYSTEM (DARK APPLE PRO) ---
+# --- 1. CONFIGURATION & DESIGN DARK MODE ---
 st.set_page_config(page_title="2026 Focus", page_icon="🎯", layout="centered")
 
-# CSS STRICT POUR FORCER LE CONTRASTE (PARDONNEZ LE BLANC SUR BLANC)
 st.markdown("""
     <style>
-    /* Fond Noir Absolu */
-    .stApp {
-        background-color: #000000 !important;
-    }
+    /* FORCE LE FOND NOIR */
+    .stApp { background-color: #000000 !important; }
     
-    /* Titres et Textes en Blanc */
-    h1, h2, h3, p, div, span, label {
-        color: #FFFFFF !important;
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
-    }
+    /* TEXTES EN BLANC */
+    h1, h2, h3, p, label, div, span { color: #FFFFFF !important; font-family: sans-serif !important; }
     
-    /* La "Bulle" (Carte) */
-    .apple-card {
-        background-color: #1C1C1E; /* Gris très sombre Apple */
+    /* CARTES INDIVIDUELLES (BULLES) */
+    .task-card {
+        background-color: #1C1C1E;
         border-radius: 18px;
         padding: 20px;
         margin-bottom: 20px;
         border: 1px solid #333;
     }
     
-    /* Inputs (Champs de texte) */
-    .stNumberInput input, .stTextInput input {
-        background-color: #2C2C2E !important;
-        color: white !important;
-        border-radius: 10px;
-    }
-    
-    /* Le Toggle (Interrupteur) - Customisation */
+    /* BOUTON TOGGLE (PERSONNALISATION) */
     div[data-testid="stCheckbox"] label {
+        font-size: 16px;
         font-weight: bold;
-        font-size: 18px;
+        color: #4CAF50 !important; /* Vert pour l'action */
     }
     
-    /* Bouton "Plus de précision" */
-    .small-btn {
-        font-size: 12px;
-        color: #0A84FF !important; /* Bleu Apple */
-        text-decoration: none;
-        cursor: pointer;
-    }
-    
-    /* Messages d'erreur/succès */
-    .stAlert {
-        background-color: #2C2C2E;
-        color: white;
-    }
+    /* INPUTS */
+    .stNumberInput input { background-color: #2C2C2E !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. BACKEND (GITHUB) ---
+# --- 2. GESTION GITHUB ---
 def get_data():
     try:
         token = st.secrets["GITHUB_TOKEN"]
@@ -72,7 +49,7 @@ def get_data():
             df = pd.read_csv(StringIO(contents.decoded_content.decode("utf-8")))
             return repo, contents, df
         except:
-            return repo, None, pd.DataFrame(columns=["Date", "XP", "Phone", "Weight", "PnL", "Note"])
+            return repo, None, pd.DataFrame(columns=["Date", "XP"])
     except:
         return None, None, None
 
@@ -85,180 +62,118 @@ def save_data(repo, contents, df, new_row):
         repo.create_file("data_2026.csv", "Init", csv)
     return df
 
-# --- 3. GESTION DE NAVIGATION ---
-if 'page' not in st.session_state:
-    st.session_state.page = 'home'
-    st.session_state.detail_view = None # Pour savoir quel graph afficher
-
-def go_home():
-    st.session_state.page = 'home'
-    st.session_state.detail_view = None
-
-def go_detail(category):
-    st.session_state.page = 'detail'
-    st.session_state.detail_view = category
-
-# --- INIT ---
+# --- 3. INIT & VARIABLES ---
 repo, contents, df = get_data()
 today_obj = datetime.now(pytz.timezone('Europe/Paris'))
-is_friday = (today_obj.weekday() == 4) # 4 = Vendredi
+is_friday = (today_obj.weekday() == 4)
 
-# ==========================================
-# PAGE DÉTAILS (GRAPHIQUES)
-# ==========================================
-if st.session_state.page == 'detail':
-    st.button("← Retour", on_click=go_home)
-    category = st.session_state.detail_view
-    
-    st.title(f"Historique : {category}")
-    
-    if df is not None and not df.empty:
-        # Configuration des graphs selon la catégorie
-        if category == "Poids":
-            if "Weight" in df.columns:
-                st.line_chart(df.set_index("Date")["Weight"])
-                st.info("Rappel : La pesée se fait uniquement le vendredi.")
-        
-        elif category == "Téléphone":
-            if "Phone" in df.columns:
-                st.bar_chart(df.set_index("Date")["Phone"])
-                st.caption("Barre idéale : En dessous de 3h")
+# Header
+st.markdown("<h1>2026 Focus</h1>", unsafe_allow_html=True)
+st.caption(today_obj.strftime('%A %d %B'))
 
-        elif category == "Finance":
-            if "PnL" in df.columns:
-                st.line_chart(df.set_index("Date")["PnL"])
-    else:
-        st.warning("Pas encore assez de données pour afficher les courbes.")
+# Message erreur si pas connecté
+if repo is None:
+    st.error("⚠️ Problème connexion GitHub (Secrets)")
 
-# ==========================================
-# PAGE D'ACCUEIL (LES BULLES)
-# ==========================================
+# --- 4. LES 9 BULLES (CARTES SÉPARÉES) ---
+# On utilise un formulaire pour tout valider d'un coup ou sauvegarder l'état
+# Mais ici on va garder l'esprit "Dashboard" avec sauvegarde globale
+
+# 1️⃣ TÉLÉPHONE
+st.markdown('<div class="task-card">', unsafe_allow_html=True)
+st.markdown("### 📵 Téléphone (< 3h)")
+phone_val = st.number_input("Heures aujourd'hui", 0.0, 24.0, 3.0, 0.5, key="in_phone")
+valid_phone = st.toggle("Glisser pour valider Téléphone", key="t_phone")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# 2️⃣ SCOLAIRE
+st.markdown('<div class="task-card">', unsafe_allow_html=True)
+st.markdown("### 🎓 Travail Scolaire")
+st.write("Le travail du jour a été fait sérieusement ?")
+valid_school = st.toggle("Glisser pour valider Scolaire", key="t_school")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# 3️⃣ INVESTISSEMENT (PnL)
+st.markdown('<div class="task-card">', unsafe_allow_html=True)
+st.markdown("### 💰 Investissements")
+pnl_val = st.number_input("Gains/Pertes du jour (€)", step=1.0, key="in_pnl")
+valid_invest = st.toggle("Glisser pour valider Invest", key="t_invest")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# 4️⃣ TWITCH
+st.markdown('<div class="task-card">', unsafe_allow_html=True)
+st.markdown("### 👾 Twitch")
+subs_val = st.number_input("Nombre d'abonnés", 11, 100000, 11, 1, key="in_subs")
+valid_twitch = st.toggle("Glisser pour valider Action Twitch", key="t_twitch")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# 5️⃣ PRIÈRE
+st.markdown('<div class="task-card">', unsafe_allow_html=True)
+st.markdown("### 🙏 Prière")
+st.write("Connexion spirituelle effectuée ?")
+valid_pray = st.toggle("Glisser pour valider Prière", key="t_pray")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# 6️⃣ SPORT & POIDS
+st.markdown('<div class="task-card">', unsafe_allow_html=True)
+st.markdown("### 🦍 Sport (Muscu)")
+st.write("20 Pompes x2 + 60 Barre")
+if is_friday:
+    weight_val = st.number_input("⚖️ Poids du Vendredi (kg)", 40.0, 150.0, 70.0, 0.1, key="in_weight")
 else:
-    st.markdown("<h1>2026 Focus</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='opacity:0.7;'>{today_obj.strftime('%A %d %B')}</p>", unsafe_allow_html=True)
+    st.info("🔒 Pesée uniquement le Vendredi")
+    weight_val = 0.0
+valid_sport = st.toggle("Glisser pour valider Sport", key="t_sport")
+st.markdown('</div>', unsafe_allow_html=True)
 
-    if repo is None:
-        st.error("❌ Erreur GitHub : Vérifie tes secrets !")
+# 7️⃣ HYGIÈNE
+st.markdown('<div class="task-card">', unsafe_allow_html=True)
+st.markdown("### 🧹 Hygiène & Chambre")
+st.write("Chambre rangée, hygiène irréprochable ?")
+valid_clean = st.toggle("Glisser pour valider Hygiène", key="t_clean")
+st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- VARIABLES DE SAUVEGARDE ---
-    # On initialise les valeurs par défaut
-    if 'val_phone' not in st.session_state: st.session_state.val_phone = 3.0
-    if 'val_weight' not in st.session_state: st.session_state.val_weight = 0.0
-    if 'val_pnl' not in st.session_state: st.session_state.val_pnl = 0.0
+# 8️⃣ BUDGET (Argent)
+st.markdown('<div class="task-card">', unsafe_allow_html=True)
+st.markdown("### 💸 Gestion Argent")
+st.write("Aucune dépense inutile aujourd'hui ?")
+valid_money = st.toggle("Glisser pour valider Budget", key="t_money")
+st.markdown('</div>', unsafe_allow_html=True)
 
-    # ----------------------------------------------------
-    # BULLE 1 : TÉLÉPHONE (Logique de temps gagné)
-    # ----------------------------------------------------
-    st.markdown('<div class="apple-card">', unsafe_allow_html=True)
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        st.markdown("### 📵 Détox Téléphone")
-    with col2:
-        if st.button("📊", key="detail_phone"): go_detail("Téléphone")
+# 9️⃣ LECTURE
+st.markdown('<div class="task-card">', unsafe_allow_html=True)
+st.markdown("### 📖 Lecture")
+st.write("Lecture quotidienne effectuée ?")
+valid_read = st.toggle("Glisser pour valider Lecture", key="t_read")
+st.markdown('</div>', unsafe_allow_html=True)
 
-    st.write("Temps d'écran aujourd'hui (Heures) :")
-    phone_input = st.number_input("Heures", min_value=0.0, max_value=24.0, step=0.1, key="input_phone", label_visibility="collapsed")
-    
-    # Logique de validation
-    if phone_input > 0:
-        temps_gagne = 16 - phone_input # Base de 16h éveillé
-        if temps_gagne > 0:
-            st.caption(f"✨ Tu as récupéré {temps_gagne:.1f}h de vie.")
-        toggle_phone = st.toggle("Valider la journée sans écran", key="toggle_phone")
-    else:
-        st.warning("⚠️ Rentre ton temps d'écran pour valider.")
-        toggle_phone = False
-    st.markdown('</div>', unsafe_allow_html=True)
+# --- BOUTON FINAL ---
+st.markdown("<br><br>", unsafe_allow_html=True)
 
+# Calcul XP
+tasks = [valid_phone, valid_school, valid_invest, valid_twitch, valid_pray, valid_sport, valid_clean, valid_money, valid_read]
+score_xp = int((sum(tasks) / 9) * 100)
 
-    # ----------------------------------------------------
-    # BULLE 2 : PHYSIQUE & POIDS (Bloqué Vendredi)
-    # ----------------------------------------------------
-    st.markdown('<div class="apple-card">', unsafe_allow_html=True)
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        st.markdown("### 🦍 Physique & Poids")
-    with col2:
-        if st.button("📊", key="detail_weight"): go_detail("Poids")
-
-    # SECTION MUSCU (Toujours visible)
-    st.markdown("**Action du jour**")
-    toggle_sport = st.toggle("20 Pompes x2 + 60 Barre", key="toggle_sport")
-    
-    st.divider()
-
-    # SECTION POIDS (Logique Vendredi)
-    st.markdown("**Pesée Hebdomadaire**")
-    if is_friday:
-        weight_input = st.number_input("Poids ce vendredi (kg)", min_value=0.0, step=0.1, key="input_weight")
-        if weight_input > 0:
-            st.success("✅ Poids enregistré pour la courbe.")
-        else:
-            st.error("⚠️ C'est vendredi : Rentre ton poids !")
-    else:
-        st.info(f"🔒 Pesée verrouillée. Prochaine pesée : Vendredi.")
-        weight_input = 0.0 # Valeur par défaut si pas vendredi
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
-    # ----------------------------------------------------
-    # BULLE 3 : FINANCE (Input obligatoire)
-    # ----------------------------------------------------
-    st.markdown('<div class="apple-card">', unsafe_allow_html=True)
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        st.markdown("### 💸 Finance & Invest")
-    with col2:
-        if st.button("📊", key="detail_finance"): go_detail("Finance")
-
-    st.write("Résultat du jour (PnL €) :")
-    pnl_input = st.number_input("PnL", step=1.0, key="input_pnl", label_visibility="collapsed")
-    
-    # Logique : On ne valide pas si c'est à 0 sans confirmation (optionnel, mais mieux pour la rigueur)
-    toggle_finance = st.toggle("Valider gestion finance", key="toggle_finance")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    
-    # ----------------------------------------------------
-    # BULLE 4 : SPIRITUEL (Simple)
-    # ----------------------------------------------------
-    st.markdown('<div class="apple-card">', unsafe_allow_html=True)
-    st.markdown("### 🧠 Esprit (Prière & Lecture)")
-    toggle_spirit = st.toggle("Actions spirituelles effectuées", key="toggle_spirit")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
-    # ==========================================
-    # BOUTON FINAL DE SAUVEGARDE
-    # ==========================================
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Calcul du XP (Simplifié : 1 point par Toggle activé)
-    xp_score = 0
-    if toggle_phone: xp_score += 25
-    if toggle_sport: xp_score += 25
-    if toggle_finance: xp_score += 25
-    if toggle_spirit: xp_score += 25
-
-    if st.button("💾 SAUVEGARDER MA JOURNÉE", type="primary", use_container_width=True):
-        if repo:
-            # Vérification : Si c'est vendredi et poids = 0, on bloque ? 
-            # Pour l'instant on laisse passer mais on sauvegarde 0.
-            
-            today_str = str(date.today())
-            
-            # On vérifie si déjà fait
-            if not df.empty and today_str in df["Date"].values:
-                st.toast("⚠️ Déjà enregistré aujourd'hui !", icon="⚠️")
-            else:
-                new_data = {
-                    "Date": today_str,
-                    "XP": xp_score,
-                    "Phone": phone_input,
-                    "Weight": weight_input, # Sera 0 si pas vendredi
-                    "PnL": pnl_input,
-                    "Note": ""
-                }
-                save_data(repo, contents, df, new_data)
-                st.balloons()
-                st.success(f"Journée validée ! Score : {xp_score}%")
+if st.button("💾 ENREGISTRER MA JOURNÉE", type="primary", use_container_width=True):
+    if repo:
+        today_str = str(date.today())
+        
+        # Vérif doublon
+        if not df.empty and today_str in df["Date"].values:
+            st.warning("⚠️ Tu as déjà enregistré aujourd'hui. (Les données seront écrasées/ajoutées)")
+        
+        new_row = {
+            "Date": today_str,
+            "XP": score_xp,
+            "Phone": phone_val,
+            "PnL": pnl_val,
+            "Subs": subs_val,
+            "Weight": weight_val,
+            # On pourrait sauver le détail de chaque booléen si tu veux, 
+            # mais pour l'instant on garde l'essentiel
+            "Note": "RAS"
+        }
+        
+        save_data(repo, contents, df, new_row)
+        st.balloons()
+        st.success(f"Journée validée ! Score: {score_xp}%")
