@@ -1,13 +1,13 @@
-# app.py
+# app.py (version mise à jour : finances séparées, dépenses, citation format auteur)
 import streamlit as st
 import pandas as pd
 from github import Github
 from io import StringIO
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 import plotly.graph_objects as go
-from typing import Optional, Tuple, Dict, Any, List
 import random
+from typing import Optional, Any, Tuple
 
 # ---------------------------
 # CONFIG
@@ -15,42 +15,41 @@ import random
 st.set_page_config(page_title="High Performance 2026", page_icon="💪", layout="centered", initial_sidebar_state="collapsed")
 
 # ---------------------------
-# CSS (iOS-like, responsive)
+# PARAMÈTRES FINANCIERS INITIAUX (modifiable)
+# ---------------------------
+INVEST_STOCKS = 50.0   # montant initial investi en bourse
+INVEST_CRYPTO = 96.0   # montant initial investi en crypto
+
+# ---------------------------
+# CSS (iOS-like)
 # ---------------------------
 st.markdown("""
 <style>
-:root {
-  --bg:#000000; --card:#1C1C1E; --card-2:#2C2C2E; --muted:#8E8E93; --accent:#0A84FF; --good:#32D74B; --bad:#FF453A;
-  --radius:16px; --font:-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
-}
+:root { --bg:#000; --card:#1C1C1E; --card2:#2C2C2E; --muted:#8E8E93; --accent:#0A84FF; --good:#32D74B; --bad:#FF453A; --radius:16px; --font:-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; }
 body {background:var(--bg); color:#fff; font-family:var(--font);}
 .stApp {padding:18px;}
-.card {background: linear-gradient(145deg, var(--card) 0%, var(--card-2) 100%); border-radius:var(--radius); padding:20px; margin-bottom:18px; border:1px solid #2A2A2C;}
+.card {background: linear-gradient(145deg, var(--card) 0%, var(--card2) 100%); border-radius:var(--radius); padding:20px; margin-bottom:18px; border:1px solid #2A2A2C;}
 .card-title {font-size:20px; font-weight:700; margin-bottom:12px;}
-.metric {background:transparent; padding:10px; border-radius:12px; text-align:center;}
+.metric {padding:10px; border-radius:12px; text-align:center;}
 .metric-value {font-size:28px; font-weight:800; color:var(--accent);}
 .metric-label {font-size:13px; color:var(--muted);}
 .small {font-size:13px; color:var(--muted);}
 hr {border-color:#2A2A2C;}
-@media (max-width:600px) {
-  .card {padding:14px;}
-  .card-title {font-size:18px;}
-}
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------
-# QUOTES (local list, rotate daily)
+# CITATIONS (texte, auteur)
 # ---------------------------
 QUOTES = [
-    "La discipline est le pont entre les objectifs et les réalisations. — Jim Rohn",
-    "Fais ce que tu dois faire aujourd'hui pour que demain soit plus simple.",
-    "Le progrès, même petit, est toujours progrès.",
-    "La constance bat le talent quand le talent ne travaille pas.",
-    "Reste humble, travaille dur, sois patient."
+    ("La discipline est le pont entre les objectifs et les réalisations.", "Jim Rohn"),
+    ("Le progrès, même petit, est toujours progrès.", "Anonyme"),
+    ("La constance bat le talent quand le talent ne travaille pas.", "Unknown"),
+    ("Fais ce que tu dois faire aujourd'hui pour que demain soit plus simple.", "Auteur inconnu"),
+    ("Reste humble, travaille dur, sois patient.", "Auteur inconnu")
 ]
 
-def quote_of_day(date: datetime) -> str:
+def quote_of_day(date: datetime) -> Tuple[str,str]:
     seed = int(date.strftime("%Y%m%d"))
     random.seed(seed)
     return random.choice(QUOTES)
@@ -66,23 +65,30 @@ def init_github() -> Optional[Any]:
         g = Github(token)
         repo = g.get_repo(repo_name)
         return repo
-    except Exception as e:
+    except Exception:
         st.error("Erreur connexion GitHub. Vérifie tes secrets.")
         return None
 
+def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
+    cols = ["Date","XP","Phone","Weight","Stocks","Crypto","Expenses","Twitch","School","Finance","Prayer","Reading","Sport","Hygiene","Budget"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = 0
+    # keep Date as datetime if present
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    return df[cols]
+
 def load_data(repo) -> Tuple[pd.DataFrame, Optional[Any]]:
-    cols = ["Date","XP","Phone","Weight","PnL","Twitch","School","Finance","Prayer","Reading","Sport","Hygiene","Budget"]
     if not repo:
-        return pd.DataFrame(columns=cols), None
+        return ensure_columns(pd.DataFrame()), None
     try:
         contents = repo.get_contents("data_2026.csv")
         df = pd.read_csv(StringIO(contents.decoded_content.decode("utf-8")))
-        # normalize date
-        df["Date"] = pd.to_datetime(df["Date"])
+        df = ensure_columns(df)
         return df, contents
     except Exception:
-        # return empty template
-        return pd.DataFrame(columns=cols), None
+        return ensure_columns(pd.DataFrame()), None
 
 def save_data(repo, df: pd.DataFrame, contents=None) -> bool:
     if not repo:
@@ -128,13 +134,14 @@ repo = init_github()
 df, contents = load_data(repo)
 
 # ---------------------------
-# HEADER
+# HEADER & QUOTE (format demandé)
 # ---------------------------
 st.markdown(f"<h1 style='text-align:center; font-size:44px;'>💪 HIGH PERFORMANCE 2026</h1>", unsafe_allow_html=True)
 st.markdown(f"<p style='text-align:center; color:#8E8E93;'>{now.strftime('%A %d %B %Y')}</p>", unsafe_allow_html=True)
 
-# Quote
-st.markdown(f"<div class='card'><div class='card-title'>💬 Citation du jour</div><p class='small'>{quote_of_day(now)}</p></div>", unsafe_allow_html=True)
+q_text, q_author = quote_of_day(now)
+# affichage : guillemets + italique + auteur connu
+st.markdown(f"<div class='card'><div class='card-title'>💬 Citation</div><p style='font-style:italic; font-size:16px;'>“{q_text}” — <strong>{q_author}</strong></p></div>", unsafe_allow_html=True)
 
 # ---------------------------
 # TABS
@@ -142,22 +149,23 @@ st.markdown(f"<div class='card'><div class='card-title'>💬 Citation du jour</d
 tab_journal, tab_stats = st.tabs(["📝 JOURNAL", "📊 STATISTIQUES"])
 
 # ---------------------------
-# JOURNAL TAB
+# JOURNAL TAB (inputs journaliers)
 # ---------------------------
 with tab_journal:
-    st.markdown("<div class='card'><div class='card-title'>📱 Habitudes & Check</div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><div class='card-title'>📱 Habitudes & Finances</div>", unsafe_allow_html=True)
     col1, col2 = st.columns([2,1])
     with col1:
         phone = st.number_input("Heures d'écran aujourd'hui", min_value=0.0, max_value=24.0, value=3.0, step=0.25, key="phone")
-        pnl = st.number_input("PnL du jour (€)", value=0.0, step=1.0, format="%.2f", key="pnl")
+        stocks = st.number_input("Gain/perte Bourse aujourd'hui (€)", value=0.0, step=0.5, format="%.2f", key="stocks")
+        crypto = st.number_input("Gain/perte Crypto aujourd'hui (€)", value=0.0, step=0.5, format="%.2f", key="crypto")
+        expenses = st.number_input("Dépenses aujourd'hui (€)", min_value=0.0, value=0.0, step=0.5, format="%.2f", key="expenses")
         twitch = st.number_input("Abonnés Twitch", min_value=0, value=int(df["Twitch"].iloc[-1]) if not df.empty else 0, step=1, key="twitch")
     with col2:
-        st.markdown("<div class='metric'><div class='metric-value'>{:.0f}%</div><div class='metric-label'>Score cible</div></div>".format(0), unsafe_allow_html=True)
-        st.caption("Le score sera calculé à l'enregistrement.")
+        st.markdown("<div class='metric'><div class='metric-value'>—</div><div class='metric-label'>Score (après enregistrement)</div></div>", unsafe_allow_html=True)
+        st.caption("Le score de discipline sera calculé à l'enregistrement.")
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # grouped toggles
-    st.markdown("<div style='display:flex; gap:12px; flex-wrap:wrap;'>", unsafe_allow_html=True)
     habits = {
         "School":"Travail/Étude fait",
         "Finance":"Finance checkée",
@@ -170,23 +178,15 @@ with tab_journal:
     toggles = {}
     for k, label in habits.items():
         toggles[k] = st.checkbox(label, key=f"chk_{k}")
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    # weight only on Friday (example)
-    is_friday = (now.weekday() == 4)
-    if is_friday:
-        weight = st.number_input("Poids (kg) - pesée du vendredi", min_value=0.0, max_value=300.0, value=70.0, step=0.1, key="weight")
-    else:
-        st.info("Pesée hebdomadaire disponible le vendredi.")
-        weight = 0.0
+    # poids disponible tout le temps
+    weight = st.number_input("Poids (kg) - entre quand tu veux", min_value=0.0, max_value=300.0, value=0.0, step=0.1, key="weight")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
     # Save button
     if st.button("💾 Enregistrer la journée", type="primary"):
-        # prepare row
         toggles_list = [int(toggles[k]) for k in habits.keys()]
-        # include phone goal
         phone_goal_ok = 1 if phone <= 3.0 else 0
         xp = int((sum(toggles_list) + phone_goal_ok) / (len(toggles_list) + 1) * 100)
         new_row = {
@@ -194,7 +194,9 @@ with tab_journal:
             "XP": xp,
             "Phone": phone,
             "Weight": weight,
-            "PnL": pnl,
+            "Stocks": float(stocks),
+            "Crypto": float(crypto),
+            "Expenses": float(expenses),
             "Twitch": int(twitch),
             **{k: int(v) for k, v in toggles.items()}
         }
@@ -206,29 +208,28 @@ with tab_journal:
                 df.loc[df["Date"].astype(str) == today_str, list(new_row.keys())] = list(new_row.values())
             else:
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        # ensure Date dtype
+        df = ensure_columns(df)
         df["Date"] = pd.to_datetime(df["Date"])
         df = df.sort_values("Date").reset_index(drop=True)
-        # save
         if save_data(repo, df, contents):
             st.success(f"Journée enregistrée — Score {xp}%")
-            # reload contents to update sha
             df, contents = load_data(repo)
         else:
             st.error("Erreur lors de la sauvegarde sur GitHub.")
 
 # ---------------------------
-# STATS TAB
+# STATISTICS TAB
 # ---------------------------
 with tab_stats:
-    st.markdown("<div class='card'><div class='card-title'>📈 Mes statistiques</div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><div class='card-title'>📈 Mes statistiques financières & habitudes</div>", unsafe_allow_html=True)
     if df.empty or len(df) < 1:
         st.info("Aucune donnée disponible. Remplis ton journal pour voir les graphiques.")
     else:
         df = df.copy()
         df["Date"] = pd.to_datetime(df["Date"])
         df = df.sort_values("Date")
-        # overview metrics
+
+        # Overview metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.markdown(f"<div class='metric'><div class='metric-value'>{df['XP'].mean():.0f}%</div><div class='metric-label'>XP moyen</div></div>", unsafe_allow_html=True)
@@ -237,41 +238,68 @@ with tab_stats:
             color = "#32D74B" if avg_phone <= 3 else "#FF453A"
             st.markdown(f"<div class='metric'><div class='metric-value' style='color:{color}'>{avg_phone:.1f}h</div><div class='metric-label'>Écran moyen</div></div>", unsafe_allow_html=True)
         with col3:
-            st.markdown(f"<div class='metric'><div class='metric-value'>{df['PnL'].sum():.0f}€</div><div class='metric-label'>PnL total</div></div>", unsafe_allow_html=True)
+            net_gain = df["Stocks"].sum() + df["Crypto"].sum()
+            color_net = "#32D74B" if net_gain >= 0 else "#FF453A"
+            st.markdown(f"<div class='metric'><div class='metric-value' style='color:{color_net}'>{net_gain:.2f}€</div><div class='metric-label'>Gain net depuis le début</div></div>", unsafe_allow_html=True)
         with col4:
-            st.markdown(f"<div class='metric'><div class='metric-value'>{df['Twitch'].iloc[-1]}</div><div class='metric-label'>Subs Twitch</div></div>", unsafe_allow_html=True)
+            total_expenses = df["Expenses"].sum()
+            st.markdown(f"<div class='metric'><div class='metric-value'>{total_expenses:.2f}€</div><div class='metric-label'>Dépenses totales</div></div>", unsafe_allow_html=True)
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
-        # Phone chart with comparisons
-        phone_df = df[["Date","Phone"]].copy()
-        phone_df["Phone_prev"] = phone_df["Phone"].shift(1)
-        phone_df["MA7"] = phone_df["Phone"].rolling(7, min_periods=1).mean()
-        fig_phone = go.Figure()
-        fig_phone.add_trace(go.Bar(x=phone_df["Date"], y=phone_df["Phone"], name="Aujourd'hui", marker_color="#FF453A"))
-        fig_phone.add_trace(go.Scatter(x=phone_df["Date"], y=phone_df["MA7"], name="Moyenne 7j", line=dict(color="#0A84FF", width=3)))
-        fig_phone.add_trace(go.Scatter(x=phone_df["Date"], y=phone_df["Phone_prev"], name="Jour précédent", line=dict(color="#8E8E93", width=2, dash="dot")))
-        fig_phone.update_layout(title="Heures d'écran — comparaison", plot_bgcolor='#1C1C1E', paper_bgcolor='#000000', font=dict(color='#FFFFFF'))
-        st.plotly_chart(fig_phone, use_container_width=True)
+        # Bourse chart
+        st.markdown("### 💹 Bourse (gain/perte journalier)")
+        df_stock = df[["Date","Stocks"]].copy()
+        df_stock["MA7"] = df_stock["Stocks"].rolling(7, min_periods=1).mean()
+        fig_stock = go.Figure()
+        fig_stock.add_trace(go.Bar(x=df_stock["Date"], y=df_stock["Stocks"], name="Journalier", marker_color="#0A84FF"))
+        fig_stock.add_trace(go.Scatter(x=df_stock["Date"], y=df_stock["MA7"], name="MA7", line=dict(color="#32D74B", width=3)))
+        fig_stock.update_layout(plot_bgcolor='#1C1C1E', paper_bgcolor='#000000', font=dict(color='#FFFFFF'))
+        st.plotly_chart(fig_stock, use_container_width=True)
 
-        # Weight
+        # Crypto chart
+        st.markdown("### 🔥 Crypto (gain/perte journalier)")
+        df_crypto = df[["Date","Crypto"]].copy()
+        df_crypto["MA7"] = df_crypto["Crypto"].rolling(7, min_periods=1).mean()
+        fig_crypto = go.Figure()
+        fig_crypto.add_trace(go.Bar(x=df_crypto["Date"], y=df_crypto["Crypto"], name="Journalier", marker_color="#BF5AF2"))
+        fig_crypto.add_trace(go.Scatter(x=df_crypto["Date"], y=df_crypto["MA7"], name="MA7", line=dict(color="#0A84FF", width=3)))
+        fig_crypto.update_layout(plot_bgcolor='#1C1C1E', paper_bgcolor='#000000', font=dict(color='#FFFFFF'))
+        st.plotly_chart(fig_crypto, use_container_width=True)
+
+        # Expenses chart
+        st.markdown("### 🧾 Dépenses quotidiennes")
+        fig_exp = go.Figure()
+        fig_exp.add_trace(go.Bar(x=df["Date"], y=df["Expenses"], name="Dépenses", marker_color="#FF453A"))
+        fig_exp.update_layout(plot_bgcolor='#1C1C1E', paper_bgcolor='#000000', font=dict(color='#FFFFFF'))
+        st.plotly_chart(fig_exp, use_container_width=True)
+
+        # Poids
+        st.markdown("### ⚖️ Évolution du poids")
         df_w = df[df["Weight"] > 0]
         if not df_w.empty:
             st.plotly_chart(line_chart(df_w, "Date", "Weight", "Poids (kg)", color="#32D74B"), use_container_width=True)
         else:
-            st.info("Pesée hebdomadaire: pas encore de données de poids.")
+            st.info("Aucune donnée de poids enregistrée pour l'instant.")
 
-        # XP evolution
-        st.plotly_chart(line_chart(df, "Date", "XP", "Score XP (%)", color="#0A84FF", target=80), use_container_width=True)
-
-        # PnL
-        st.plotly_chart(bar_chart(df, "Date", "PnL", "PnL quotidien (€)", color="#FFD60A"), use_container_width=True)
+        # ROI & investissements
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown("#### 💰 Investissements & ROI")
+        invested_total = INVEST_STOCKS + INVEST_CRYPTO
+        roi_text = "N/A"
+        if invested_total > 0:
+            roi = (net_gain / invested_total) * 100
+            roi_text = f"{roi:.2f}%"
+        st.markdown(f"- Investi en bourse : **{INVEST_STOCKS:.2f}€**")
+        st.markdown(f"- Investi en crypto : **{INVEST_CRYPTO:.2f}€**")
+        st.markdown(f"- Gain net depuis le début : **{net_gain:.2f}€**")
+        st.markdown(f"- ROI simple : **{roi_text}**")
 
         # Detailed rates
         st.markdown("<hr>", unsafe_allow_html=True)
         st.markdown("#### Taux de réussite par catégorie")
         rates = {}
-        for k in habits.keys():
+        for k in ["School","Finance","Prayer","Reading","Sport","Hygiene","Budget"]:
             if k in df.columns:
                 rates[k] = df[k].sum() / len(df) * 100
         cols = st.columns(len(rates))
