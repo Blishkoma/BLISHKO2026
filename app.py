@@ -1,5 +1,5 @@
-# app.py - Blishko's Mindset (script unique : purge immédiate, purge automatique, marqueurs réduits)
-# Copie-colle intégralement ce fichier dans ton projet Streamlit et lance : streamlit run app.py
+# app.py - Blishko's Mindset (version finale)
+# Copie-colle ce fichier et lance : streamlit run app.py
 
 import streamlit as st
 import pandas as pd
@@ -11,6 +11,13 @@ import plotly.graph_objects as go
 import random
 from typing import Optional, Any, Tuple
 import os
+import logging
+
+# ---------------------------
+# LOGGING (utile pour debug si besoin)
+# ---------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("blishko")
 
 # ---------------------------
 # CONFIG PAGE
@@ -18,16 +25,16 @@ import os
 st.set_page_config(page_title="Blishko’s Mindset", page_icon="💪", layout="centered", initial_sidebar_state="collapsed")
 
 # ---------------------------
-# SIDEBAR SETTINGS
+# SIDEBAR SETTINGS (modifiable)
 # ---------------------------
 st.sidebar.header("Paramètres")
 INVEST_STOCKS = st.sidebar.number_input("Investi en bourse (initial)", value=50.0, step=1.0, format="%.2f")
 INVEST_CRYPTO = st.sidebar.number_input("Investi en crypto (initial)", value=96.0, step=1.0, format="%.2f")
 RETENTION_DAYS = int(st.sidebar.number_input("Durée de conservation (jours)", value=365, step=1))
-st.sidebar.caption("Ajoute GITHUB_TOKEN et REPO_NAME dans st.secrets pour sauvegarder sur GitHub (optionnel).")
+st.sidebar.caption("Si tu veux sauvegarder sur GitHub, ajoute GITHUB_TOKEN et REPO_NAME dans st.secrets.")
 
 # ---------------------------
-# CSS (barre large, style iOS-like)
+# STYLE CSS (iOS-like, barre large)
 # ---------------------------
 st.markdown("""
 <style>
@@ -57,7 +64,9 @@ QUOTES = [
     ("Le progrès, même petit, est toujours progrès.", "James Clear"),
     ("La constance bat le talent quand le talent ne travaille pas.", "Ryan Holiday"),
     ("Fais ce que tu dois faire aujourd'hui pour que demain soit plus simple.", "David Goggins"),
-    ("Reste humble, travaille dur, sois patient.", "Naval Ravikant")
+    ("Reste humble, travaille dur, sois patient.", "Naval Ravikant"),
+    ("Ne cherche pas à être meilleur que les autres, cherche à être meilleur que toi-même.", "Jordan Peterson"),
+    ("Les habitudes façonnent le destin.", "Aristote")
 ]
 
 def quote_of_day(date: datetime) -> Tuple[str,str]:
@@ -66,7 +75,7 @@ def quote_of_day(date: datetime) -> Tuple[str,str]:
     return random.choice(QUOTES)
 
 # ---------------------------
-# GITHUB HELPERS (lecture/écriture sécurisée)
+# GITHUB HELPERS (lecture/écriture)
 # ---------------------------
 @st.cache_resource
 def init_github() -> Optional[Any]:
@@ -75,8 +84,10 @@ def init_github() -> Optional[Any]:
         repo_name = st.secrets["REPO_NAME"]
         g = Github(token)
         repo = g.get_repo(repo_name)
+        logger.info("Connexion GitHub OK")
         return repo
-    except Exception:
+    except Exception as e:
+        logger.info("GitHub non configuré ou erreur de connexion")
         return None
 
 def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -96,9 +107,8 @@ def load_data(repo) -> Tuple[pd.DataFrame, Optional[Any]]:
             df = pd.read_csv(StringIO(contents.decoded_content.decode("utf-8")))
             df = ensure_columns(df)
             return df, contents
-        except Exception:
-            # fall back to local file if present
-            pass
+        except Exception as e:
+            logger.info("Pas de fichier sur GitHub ou erreur lecture, fallback local")
     try:
         df = pd.read_csv("data_2026.csv")
         df = ensure_columns(df)
@@ -115,61 +125,65 @@ def save_data(repo, df: pd.DataFrame, contents=None) -> bool:
             else:
                 repo.create_file("data_2026.csv", "Initial commit - Blishko's Mindset", csv_content)
             return True
-        except Exception:
-            return False
-    else:
+        except Exception as e:
+            logger.warning("Échec sauvegarde GitHub, tentative locale")
+            # fallback to local
+    try:
+        with open("data_2026.csv", "w", encoding="utf-8") as f:
+            f.write(csv_content)
+        return True
+    except Exception as e:
+        logger.error("Échec sauvegarde locale: %s", e)
+        return False
+
+# ---------------------------
+# BACKUP & PURGE (automatique unique)
+# ---------------------------
+def make_empty_df() -> pd.DataFrame:
+    cols = ["Date","XP","Phone","Weight","Stocks","Crypto","Expenses","Twitch","School","Finance","Prayer","Reading","Sport","Hygiene","Budget"]
+    return pd.DataFrame(columns=cols)
+
+def backup_and_clear(repo, contents, df, tz, retention_start):
+    """
+    Sauvegarde un backup (GitHub si possible, sinon local) puis remplace data_2026.csv par un fichier vide.
+    Retourne (success: bool, message: str).
+    """
+    timestamp = datetime.now(tz).strftime("%Y%m%d_%H%M%S")
+    backup_name = f"data_2026_backup_{timestamp}.csv"
+    csv_content = df.to_csv(index=False)
+
+    # Try GitHub backup if repo available
+    if repo:
         try:
-            with open("data_2026.csv", "w", encoding="utf-8") as f:
-                f.write(csv_content)
-            return True
-        except Exception:
-            return False
+            # create backup file in repo (unique name)
+            repo.create_file(backup_name, f"Backup before purge {timestamp}", csv_content)
+            # replace main data file with empty template
+            empty_csv = make_empty_df().to_csv(index=False)
+            if contents:
+                repo.update_file("data_2026.csv", f"Reset data after backup {timestamp}", empty_csv, contents.sha)
+            else:
+                repo.create_file("data_2026.csv", f"Reset data after backup {timestamp}", empty_csv)
+            return True, f"Backup GitHub créé : {backup_name} ; données réinitialisées."
+        except Exception as e:
+            logger.warning("Backup GitHub échoué: %s", e)
+            # fallback to local
 
-# ---------------------------
-# PURGE HELPERS (purge immédiate et purge automatique)
-# ---------------------------
-def purge_old_test_data(df: pd.DataFrame, retention_start: datetime) -> pd.DataFrame:
-    if df.empty:
-        return df
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    cleaned = df[df["Date"] >= retention_start].copy()
-    cleaned = cleaned.reset_index(drop=True)
-    return cleaned
-
-def purge_now_action(repo, contents, retention_start: datetime) -> Tuple[bool, str]:
-    """
-    Purge immédiatement toutes les lignes antérieures à retention_start.
-    Retourne (success, message).
-    """
+    # Local backup fallback
     try:
-        # load current data (prefer GitHub contents if provided)
-        if repo and contents:
-            df = pd.read_csv(StringIO(contents.decoded_content.decode("utf-8")))
-        else:
-            df = pd.read_csv("data_2026.csv")
-    except FileNotFoundError:
-        return False, "Aucun fichier de données trouvé (data_2026.csv)."
+        local_backup_path = backup_name
+        with open(local_backup_path, "w", encoding="utf-8") as f:
+            f.write(csv_content)
+        # overwrite local data file with empty template
+        make_empty_df().to_csv("data_2026.csv", index=False)
+        return True, f"Backup local créé : {local_backup_path} ; données locales réinitialisées."
     except Exception as e:
-        return False, f"Erreur lecture des données : {e}"
-
-    try:
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        df_clean = df[df["Date"] >= retention_start].copy().reset_index(drop=True)
-        csv_content = df_clean.to_csv(index=False)
-        if repo and contents:
-            repo.update_file("data_2026.csv", f"Purge tests before {retention_start.isoformat()}", csv_content, contents.sha)
-            return True, f"Purge GitHub effectuée. Lignes conservées : {len(df_clean)}."
-        else:
-            with open("data_2026.csv", "w", encoding="utf-8") as f:
-                f.write(csv_content)
-            return True, f"Purge locale effectuée. Lignes conservées : {len(df_clean)}."
-    except Exception as e:
-        return False, f"Erreur lors de la purge : {e}"
+        logger.error("Échec backup local: %s", e)
+        return False, f"Échec backup local : {e}"
 
 # ---------------------------
-# CHART HELPERS (marqueurs réduits size=4, flèche rouge)
+# CHART HELPERS (marqueurs réduits, flèche rouge)
 # ---------------------------
-MARKER_SIZE = 4  # réduit comme demandé
+MARKER_SIZE = 4  # petits carrés comme demandé
 
 def line_chart_with_arrow(df: pd.DataFrame, x_col: str, y_col: str, title: str, color: str = "#0A84FF", target: Optional[float]=None):
     fig = go.Figure()
@@ -210,12 +224,37 @@ today_local = now.date()
 RETENTION_START = tz.localize(datetime(today_local.year, today_local.month, today_local.day, 20, 0, 0))
 RETENTION_END = RETENTION_START + timedelta(days=RETENTION_DAYS)
 
-# session flag to avoid repeated auto-purge in same session
+# session flags
 if "auto_purge_done" not in st.session_state:
     st.session_state["auto_purge_done"] = False
+if "purge_done" not in st.session_state:
+    st.session_state["purge_done"] = False
 
+# init GitHub (optional)
 repo = init_github()
 df, contents = load_data(repo)
+
+# --- Purge once at first run: backup existing data and clear it so the app starts clean ---
+# This executes once per session when the app is first launched after you paste this file.
+# It creates a backup file (GitHub if configured, otherwise local) and replaces data_2026.csv with an empty template.
+if (not st.session_state["purge_done"]):
+    # Only perform purge if there is existing data (non-empty) to backup/clear.
+    try:
+        if df is not None and not df.empty:
+            success, msg = backup_and_clear(repo, contents, df, tz, RETENTION_START)
+            if success:
+                logger.info("Backup and clear done: %s", msg)
+            else:
+                logger.warning("Backup failed: %s", msg)
+            # reload after backup/clear
+            df, contents = load_data(repo)
+        else:
+            # ensure empty file exists locally if none
+            make_empty_df().to_csv("data_2026.csv", index=False)
+        st.session_state["purge_done"] = True
+    except Exception as e:
+        logger.exception("Erreur lors de la purge initiale: %s", e)
+        st.session_state["purge_done"] = True  # avoid blocking the app
 
 # ---------------------------
 # HEADER + BARRE DE PROGRESSION (précision 0,01)
@@ -252,22 +291,11 @@ st.markdown(f"<div class='card'><p class='quote'>“{q_text}” <span class='quo
 tab_journal, tab_stats = st.tabs(["📝 JOURNAL", "📊 STATISTIQUES"])
 
 # ---------------------------
-# JOURNAL TAB
+# JOURNAL TAB (inputs journaliers)
 # ---------------------------
 with tab_journal:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown("<div style='font-weight:700; font-size:18px; margin-bottom:8px;'>Habitudes & Finances</div>", unsafe_allow_html=True)
-
-    # purge manual button (exécute purge_now_action)
-    st.markdown("<div style='margin-bottom:8px;'><strong>Gestion des données de test</strong></div>", unsafe_allow_html=True)
-    if st.button("🧹 Supprimer toutes les données antérieures au démarrage de conservation (tests)"):
-        success, message = purge_now_action(repo, contents, RETENTION_START)
-        if success:
-            st.success(message)
-            df, contents = load_data(repo)
-        else:
-            st.error(message)
-    st.caption(f"Les données seront conservées à partir du {RETENTION_START.strftime('%Y-%m-%d %H:%M')} pendant {RETENTION_DAYS} jours (approx. 1 an).")
 
     col1, col2 = st.columns([2,1])
     with col1:
@@ -275,7 +303,8 @@ with tab_journal:
         stocks = st.number_input("Gain/perte Bourse aujourd'hui (€)", value=0.0, step=0.5, format="%.2f", key="stocks")
         crypto = st.number_input("Gain/perte Crypto aujourd'hui (€)", value=0.0, step=0.5, format="%.2f", key="crypto")
         expenses = st.number_input("Dépenses aujourd'hui (€)", min_value=0.0, value=0.0, step=0.5, format="%.2f", key="expenses")
-        twitch = st.number_input("Abonnés Twitch", min_value=0, value=int(df["Twitch"].iloc[-1]) if not df.empty else 0, step=1, key="twitch")
+        twitch_default = int(df["Twitch"].iloc[-1]) if (df is not None and not df.empty) else 0
+        twitch = st.number_input("Abonnés Twitch", min_value=0, value=twitch_default, step=1, key="twitch")
     with col2:
         st.markdown("<div class='metric'><div class='metric-value'>—</div><div class='metric-label'>Score (après enregistrement)</div></div>", unsafe_allow_html=True)
         st.caption("Le score de discipline sera calculé à l'enregistrement.")
@@ -315,7 +344,7 @@ with tab_journal:
         }
 
         # upsert
-        if df.empty:
+        if df is None or df.empty:
             df = pd.DataFrame([new_row])
         else:
             if today_str in df["Date"].astype(str).values:
@@ -323,10 +352,15 @@ with tab_journal:
             else:
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
-        # purge automatique au premier enregistrement après RETENTION_START
+        # purge automatique au premier enregistrement après RETENTION_START (si applicable)
         now_local = datetime.now(tz)
         if (not st.session_state["auto_purge_done"]) and (now_local >= RETENTION_START):
-            df = purge_old_test_data(df, RETENTION_START)
+            # purge old test data older than RETENTION_START
+            try:
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+                df = df[df["Date"] >= RETENTION_START].reset_index(drop=True)
+            except Exception:
+                pass
             st.session_state["auto_purge_done"] = True
 
         df = ensure_columns(df)
@@ -343,6 +377,7 @@ with tab_journal:
             # trouver la ligne d'hier si existante
             yesterday_row = None
             if len(df) >= 2:
+                # on suppose que la dernière ligne est aujourd'hui
                 yesterday_row = df.iloc[-2]
 
             analysis_lines = []
@@ -404,7 +439,7 @@ with tab_journal:
 with tab_stats:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown("<div style='font-weight:700; font-size:18px; margin-bottom:8px;'>Statistiques financières & habitudes</div>", unsafe_allow_html=True)
-    if df.empty or len(df) < 1:
+    if df is None or df.empty or len(df) < 1:
         st.info("Aucune donnée disponible. Remplis ton journal pour voir les graphiques.")
     else:
         df = df.copy()
