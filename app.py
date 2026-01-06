@@ -1,4 +1,6 @@
-# app.py - Blishko's Mindset (version finale)
+# app.py - Blishko's Mindset (script unique : purge immédiate, purge automatique, marqueurs réduits)
+# Copie-colle intégralement ce fichier dans ton projet Streamlit et lance : streamlit run app.py
+
 import streamlit as st
 import pandas as pd
 from github import Github
@@ -8,6 +10,7 @@ import pytz
 import plotly.graph_objects as go
 import random
 from typing import Optional, Any, Tuple
+import os
 
 # ---------------------------
 # CONFIG PAGE
@@ -15,14 +18,13 @@ from typing import Optional, Any, Tuple
 st.set_page_config(page_title="Blishko’s Mindset", page_icon="💪", layout="centered", initial_sidebar_state="collapsed")
 
 # ---------------------------
-# SETTINGS MODIFIABLES (SIDEBAR)
+# SIDEBAR SETTINGS
 # ---------------------------
 st.sidebar.header("Paramètres")
 INVEST_STOCKS = st.sidebar.number_input("Investi en bourse (initial)", value=50.0, step=1.0, format="%.2f")
 INVEST_CRYPTO = st.sidebar.number_input("Investi en crypto (initial)", value=96.0, step=1.0, format="%.2f")
 RETENTION_DAYS = int(st.sidebar.number_input("Durée de conservation (jours)", value=365, step=1))
-# GitHub secrets must be set in st.secrets: GITHUB_TOKEN and REPO_NAME
-st.sidebar.caption("Ajoute GITHUB_TOKEN et REPO_NAME dans st.secrets pour sauvegarder sur GitHub.")
+st.sidebar.caption("Ajoute GITHUB_TOKEN et REPO_NAME dans st.secrets pour sauvegarder sur GitHub (optionnel).")
 
 # ---------------------------
 # CSS (barre large, style iOS-like)
@@ -64,7 +66,7 @@ def quote_of_day(date: datetime) -> Tuple[str,str]:
     return random.choice(QUOTES)
 
 # ---------------------------
-# GITHUB HELPERS
+# GITHUB HELPERS (lecture/écriture sécurisée)
 # ---------------------------
 @st.cache_resource
 def init_github() -> Optional[Any]:
@@ -87,25 +89,25 @@ def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df[cols]
 
 def load_data(repo) -> Tuple[pd.DataFrame, Optional[Any]]:
-    if not repo:
-        # try local fallback: if file exists locally, load it; otherwise empty
+    # Try GitHub first if configured, otherwise local fallback
+    if repo:
         try:
-            df = pd.read_csv("data_2026.csv")
+            contents = repo.get_contents("data_2026.csv")
+            df = pd.read_csv(StringIO(contents.decoded_content.decode("utf-8")))
             df = ensure_columns(df)
-            return df, None
+            return df, contents
         except Exception:
-            return ensure_columns(pd.DataFrame()), None
+            # fall back to local file if present
+            pass
     try:
-        contents = repo.get_contents("data_2026.csv")
-        df = pd.read_csv(StringIO(contents.decoded_content.decode("utf-8")))
+        df = pd.read_csv("data_2026.csv")
         df = ensure_columns(df)
-        return df, contents
+        return df, None
     except Exception:
         return ensure_columns(pd.DataFrame()), None
 
 def save_data(repo, df: pd.DataFrame, contents=None) -> bool:
     csv_content = df.to_csv(index=False)
-    # try GitHub if available, otherwise save locally
     if repo:
         try:
             if contents:
@@ -124,7 +126,7 @@ def save_data(repo, df: pd.DataFrame, contents=None) -> bool:
             return False
 
 # ---------------------------
-# PURGE HELPERS
+# PURGE HELPERS (purge immédiate et purge automatique)
 # ---------------------------
 def purge_old_test_data(df: pd.DataFrame, retention_start: datetime) -> pd.DataFrame:
     if df.empty:
@@ -134,12 +136,51 @@ def purge_old_test_data(df: pd.DataFrame, retention_start: datetime) -> pd.DataF
     cleaned = cleaned.reset_index(drop=True)
     return cleaned
 
+def purge_now_action(repo, contents, retention_start: datetime) -> Tuple[bool, str]:
+    """
+    Purge immédiatement toutes les lignes antérieures à retention_start.
+    Retourne (success, message).
+    """
+    try:
+        # load current data (prefer GitHub contents if provided)
+        if repo and contents:
+            df = pd.read_csv(StringIO(contents.decoded_content.decode("utf-8")))
+        else:
+            df = pd.read_csv("data_2026.csv")
+    except FileNotFoundError:
+        return False, "Aucun fichier de données trouvé (data_2026.csv)."
+    except Exception as e:
+        return False, f"Erreur lecture des données : {e}"
+
+    try:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        df_clean = df[df["Date"] >= retention_start].copy().reset_index(drop=True)
+        csv_content = df_clean.to_csv(index=False)
+        if repo and contents:
+            repo.update_file("data_2026.csv", f"Purge tests before {retention_start.isoformat()}", csv_content, contents.sha)
+            return True, f"Purge GitHub effectuée. Lignes conservées : {len(df_clean)}."
+        else:
+            with open("data_2026.csv", "w", encoding="utf-8") as f:
+                f.write(csv_content)
+            return True, f"Purge locale effectuée. Lignes conservées : {len(df_clean)}."
+    except Exception as e:
+        return False, f"Erreur lors de la purge : {e}"
+
 # ---------------------------
-# CHART HELPERS (petits carrés, flèche rouge)
+# CHART HELPERS (marqueurs réduits size=4, flèche rouge)
 # ---------------------------
+MARKER_SIZE = 4  # réduit comme demandé
+
 def line_chart_with_arrow(df: pd.DataFrame, x_col: str, y_col: str, title: str, color: str = "#0A84FF", target: Optional[float]=None):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df[x_col], y=df[y_col], mode='lines+markers', line=dict(color=color, width=3), marker=dict(size=6, symbol='square', color=color), name=title))
+    fig.add_trace(go.Scatter(
+        x=df[x_col],
+        y=df[y_col],
+        mode='lines+markers',
+        line=dict(color=color, width=3),
+        marker=dict(size=MARKER_SIZE, symbol='square', color=color),
+        name=title
+    ))
     if len(df) >= 2:
         x0 = df[x_col].iloc[-2]; y0 = df[y_col].iloc[-2]
         x1 = df[x_col].iloc[-1]; y1 = df[y_col].iloc[-1]
@@ -153,7 +194,7 @@ def line_chart_with_arrow(df: pd.DataFrame, x_col: str, y_col: str, title: str, 
 def bar_with_small_squares(df: pd.DataFrame, x_col: str, y_col: str, title: str, bar_color: str = "#FFD60A", square_color: str = "#FF453A"):
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df[x_col], y=df[y_col], name=title, marker=dict(color=bar_color)))
-    fig.add_trace(go.Scatter(x=df[x_col], y=df[y_col], mode='markers', marker=dict(symbol='square', size=6, color=square_color), name='points'))
+    fig.add_trace(go.Scatter(x=df[x_col], y=df[y_col], mode='markers', marker=dict(symbol='square', size=MARKER_SIZE, color=square_color), name='points'))
     fig.update_layout(title=title, plot_bgcolor='#1C1C1E', paper_bgcolor='#000000', font=dict(color='#FFFFFF', family='-apple-system'), xaxis=dict(gridcolor='#2C2C2E'), yaxis=dict(gridcolor='#2C2C2E'), margin=dict(l=20,r=20,t=50,b=20))
     return fig
 
@@ -217,18 +258,15 @@ with tab_journal:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown("<div style='font-weight:700; font-size:18px; margin-bottom:8px;'>Habitudes & Finances</div>", unsafe_allow_html=True)
 
-    # purge manual button
+    # purge manual button (exécute purge_now_action)
     st.markdown("<div style='margin-bottom:8px;'><strong>Gestion des données de test</strong></div>", unsafe_allow_html=True)
     if st.button("🧹 Supprimer toutes les données antérieures au démarrage de conservation (tests)"):
-        if df.empty:
-            st.info("Aucune donnée à supprimer.")
+        success, message = purge_now_action(repo, contents, RETENTION_START)
+        if success:
+            st.success(message)
+            df, contents = load_data(repo)
         else:
-            df_clean = purge_old_test_data(df, RETENTION_START)
-            if save_data(repo, df_clean, contents):
-                st.success("Les données antérieures ont été supprimées. Seules les données depuis le démarrage sont conservées.")
-                df, contents = load_data(repo)
-            else:
-                st.error("Erreur lors de la purge. Vérifie la connexion GitHub ou les permissions.")
+            st.error(message)
     st.caption(f"Les données seront conservées à partir du {RETENTION_START.strftime('%Y-%m-%d %H:%M')} pendant {RETENTION_DAYS} jours (approx. 1 an).")
 
     col1, col2 = st.columns([2,1])
@@ -305,7 +343,6 @@ with tab_journal:
             # trouver la ligne d'hier si existante
             yesterday_row = None
             if len(df) >= 2:
-                # on suppose que la dernière ligne est aujourd'hui
                 yesterday_row = df.iloc[-2]
 
             analysis_lines = []
@@ -359,7 +396,7 @@ with tab_journal:
             # recharger
             df, contents = load_data(repo)
         else:
-            st.error("Erreur lors de la sauvegarde. Vérifie GITHUB_TOKEN / REPO_NAME ou les permissions d'écriture.")
+            st.error("Erreur lors de la sauvegarde. Vérifie GITHUB_TOKEN / REPO_NAME ou les permissions d'écriture, ou l'accès au fichier local.")
 
 # ---------------------------
 # STATISTICS TAB
@@ -397,8 +434,8 @@ with tab_stats:
         df_stock["MA7"] = df_stock["Stocks"].rolling(7, min_periods=1).mean()
         fig_stock = go.Figure()
         fig_stock.add_trace(go.Bar(x=df_stock["Date"], y=df_stock["Stocks"], name="Journalier", marker_color="#0A84FF"))
-        fig_stock.add_trace(go.Scatter(x=df_stock["Date"], y=df_stock["MA7"], name="MA7", line=dict(color="#32D74B", width=3), marker=dict(size=6, symbol='square', color="#32D74B")))
-        fig_stock.add_trace(go.Scatter(x=df_stock["Date"], y=df_stock["Stocks"], mode='markers', marker=dict(symbol='square', size=6, color="#FF453A"), name='points'))
+        fig_stock.add_trace(go.Scatter(x=df_stock["Date"], y=df_stock["MA7"], name="MA7", line=dict(color="#32D74B", width=3), marker=dict(size=MARKER_SIZE, symbol='square', color="#32D74B")))
+        fig_stock.add_trace(go.Scatter(x=df_stock["Date"], y=df_stock["Stocks"], mode='markers', marker=dict(symbol='square', size=MARKER_SIZE, color="#FF453A"), name='points'))
         if len(df_stock) >= 2:
             x0 = df_stock["Date"].iloc[-2]; y0 = df_stock["Stocks"].iloc[-2]
             x1 = df_stock["Date"].iloc[-1]; y1 = df_stock["Stocks"].iloc[-1]
@@ -413,8 +450,8 @@ with tab_stats:
         df_crypto["MA7"] = df_crypto["Crypto"].rolling(7, min_periods=1).mean()
         fig_crypto = go.Figure()
         fig_crypto.add_trace(go.Bar(x=df_crypto["Date"], y=df_crypto["Crypto"], name="Journalier", marker_color="#BF5AF2"))
-        fig_crypto.add_trace(go.Scatter(x=df_crypto["Date"], y=df_crypto["MA7"], name="MA7", line=dict(color="#0A84FF", width=3), marker=dict(size=6, symbol='square', color="#0A84FF")))
-        fig_crypto.add_trace(go.Scatter(x=df_crypto["Date"], y=df_crypto["Crypto"], mode='markers', marker=dict(symbol='square', size=6, color="#FF453A"), name='points'))
+        fig_crypto.add_trace(go.Scatter(x=df_crypto["Date"], y=df_crypto["MA7"], name="MA7", line=dict(color="#0A84FF", width=3), marker=dict(size=MARKER_SIZE, symbol='square', color="#0A84FF")))
+        fig_crypto.add_trace(go.Scatter(x=df_crypto["Date"], y=df_crypto["Crypto"], mode='markers', marker=dict(symbol='square', size=MARKER_SIZE, color="#FF453A"), name='points'))
         if len(df_crypto) >= 2:
             x0 = df_crypto["Date"].iloc[-2]; y0 = df_crypto["Crypto"].iloc[-2]
             x1 = df_crypto["Date"].iloc[-1]; y1 = df_crypto["Crypto"].iloc[-1]
